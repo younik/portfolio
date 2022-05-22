@@ -19,7 +19,7 @@ social: true  # includes social icons at the bottom of the page
 
 Hello world 👋  
 
-I am at EPFL as a visiting student in the *Machine Learning and Optimization Laboratory*. I am researching under the supervision of [Thijs Vogels](https://thijs.link/) on improvements for PowerSGD. I am also an AI Master's student at the University of Bologna; previously, I took my Bachelor's in Computer Engineering.  
+I am at EPFL as a visiting student in the *Machine Learning and Optimization Laboratory*. I am researching under the supervision of [Thijs Vogels](https://thijs.link/) on improvements for PowerSGD. I am also an AI Master's student at the University of Bologna; previously, I took my Bachelor's in Computer Engineering at University of Brescia.  
 My main research interests are improving *Reinforcement Learning* generalisation with *Meta-Learning* techniques, *Continual Reinforcement Learning* and *Causal Reinforcement Learning*. Anyway, I tend to be passionate about everything around AI; currently, I am exploring Dynamic Neural Networks. 
 
 Since I was young, I like programming and open-source culture 👨‍💻  
