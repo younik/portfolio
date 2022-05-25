@@ -56,8 +56,8 @@
               {%- if p.nav and p.autogen == nil -%}
               {%- if p.dropdown %}
               <li class="nav-item dropdown {% if page.title == p.title %}active{% endif %}">
-                <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">{{ p.title }}
-                  {%- if page.title == p.title -%}
+                <a class="nav-link dropdown-toggle" href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">{{ p.nav_title }}
+                  {%- if page.nav_title == p.nav_title -%}
                   <span class="sr-only">(current)</span>
                   {%- endif -%}
                 </a>
@@ -66,15 +66,15 @@
                   {%- if child.title == 'divider' %}
                   <div class="dropdown-divider"></div>
                   {%- else %}
-                  <a class="dropdown-item" href="{{ child.permalink | relative_url }}">{{ child.title }}</a>
+                  <a class="dropdown-item" href="{{ child.permalink | relative_url }}">{{ child.nav_title }}</a>
                   {%- endif -%}
                   {% endfor %}
                 </div>
               </li>
               {%- else %}
               <li class="nav-item {% if page.title == p.title %}active{% endif %}">
-                <a class="nav-link" href="{{ p.url | relative_url }}">{{ p.title }}
-                  {%- if page.title == p.title -%}
+                <a class="nav-link" href="{{ p.url | relative_url }}">{{ p.nav_title }}
+                  {%- if page.nav_title == p.nav_title -%}
                   <span class="sr-only">(current)</span>
                   {%- endif -%}
                 </a>
@@ -85,7 +85,7 @@
 
               <!-- CV link -->
               <li class="nav-item {% if page.title == p.title %}active{% endif %}">
-                <a class="nav-link" href="{{ '/assets/pdf/cv.pdf' | prepend: site.baseurl | prepend: site.url }}">cv</a>
+                <a class="nav-link" href="{{ '/assets/pdf/cv.pdf' | prepend: site.baseurl | prepend: site.url }}" target="_blank">cv</a>
               </li>
 
               {%- if site.enable_darkmode %}

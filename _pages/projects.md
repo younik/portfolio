@@ -1,6 +1,7 @@
 ---
 layout: page
-title: projects
+nav_title: projects
+title: Projects and contributions
 permalink: /projects/
 description: A non-exhaustive list
 nav: true
