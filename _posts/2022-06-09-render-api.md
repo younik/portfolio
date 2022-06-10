@@ -56,7 +56,7 @@ for _ in range(100):
 frame_collection = env.render()
 env.close()
 {% endhighlight %}
-The frame collection will be a list of 101 (1 after the initial reset and 100 steps) *rgb array*.
+The frame collection will be a list of 101 *rgb arrays* (1 after the initial reset and 100 steps).
 
 If you don't want rendering, you can just ignore the `render_mode` attribute; if you need to render just some frames, and the environment allows it, you can use the special mode `single_rgb_array`. In this case, the method `render` will return a single frame, as before.
 
@@ -64,7 +64,7 @@ If you don't want rendering, you can just ignore the `render_mode` attribute; if
 ## How to update your environment?
 
 Updating your environment to this new API is super easy. \\
-You just need to follow these 4 steps: 
+You just need to follow these 5 steps: 
 
 **1. Rename your current render function as *_render_frame* (for example)**
 ```diff
@@ -117,6 +117,25 @@ If you want to maintain backward compatibility, you will probably need to write 
 +      return self._render_frame(mode)
 ```
 In this case, remember to remove the *mode* argument along with the release of Gym 1.0, since it will be removed.
+At this point, your environment is supporting the new render API. However, your environment is only supporting collections of frames, thus it is not handy for rendering just part of episodes. You should
+
+**5. Support single-frame rendering**
+
+Most of the time, it just means to add *single_rgb_array* to your `render_modes`:
+
+```diff
+- metadata = {"render_modes": ["human", "rgb_array"], ...}
++ metadata = {"render_modes": ["human", "rgb_array", "single_rgb_array"], ...}
+```
+
+and update your `_render_frame` function to behave equally for *rgb_array* and *single_rgb_array*.
+For example, replace if statements in this way:
+```diff
+- if mode == "rgb_array":
++ if mode in {"rgb_array", "single_rgb_array"}:
+```
+
+If you have non-standard rendering modes, you can customize the Renderer class; visit the [documentation](https://github.com/openai/gym/blob/master/gym/utils/renderer.py) for more information.
 
 For more a complicated environment, the process can be different; if you need any help **feel free to contact me.** 
 
