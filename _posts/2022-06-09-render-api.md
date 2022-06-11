@@ -104,7 +104,7 @@ def reset(self, ...):
 
 **4. Write the actual render function**
 ```diff
-+ def render():
++ def render(self):
 +   return self._renderer.get_renders()
 ```
 
