@@ -80,7 +80,6 @@ You just need to follow these 5 steps:
 - def __init__(self, ...)
 + def __init__(self, render_mode: Optional[str] = None, ...)
     ...
-+   assert render_mode is None or render_mode in self.metadata["render_modes"]
 +   self.render_mode = render_mode
 +   self._renderer = Renderer(self.render_mode, self._render_frame)
 ```
