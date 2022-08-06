@@ -7,7 +7,7 @@ first_name: Omar
 middle_name: G.
 last_name: Younis
 pronouns: He/Him
-email: firstname[at]lastname[dot]dev
+email: firstname.lastname98[at]gmail[dot]com
 description: > # the ">" symbol means to ignore newlines until "footer_text:"
   A simple, whitespace theme for academics. Based on [*folio](https://github.com/bogoli/-folio) design.
 footer_text: >
