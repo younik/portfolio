@@ -42,11 +42,24 @@ for _ in range(100):
 env.close()
 {% endhighlight %}
 
-Ok, but **how does it work for non-human rendering?**
-The environment will save all the frames internally, and you can retrieve all of them at once, calling `render`:
 
+For render modes that are expected to return something, you can still get the result with `.render()`:
 {% highlight python linenos %}
 env = gym.make("FrozenLake-v1", render_mode="rgb_array")
+
+env.reset()
+
+for _ in range(100):
+    env.step(env.action_space.sample())
+    env.render()  # return a ndarray frame
+
+env.close()
+{% endhighlight %}
+
+With this new API, we also introduce `_list` modes. In this case, the environment will save all the frames internally, and you can retrieve all of them at once calling `render`:
+
+{% highlight python linenos %}
+env = gym.make("FrozenLake-v1", render_mode="rgb_array_list")
 
 env.reset()
 
@@ -58,86 +71,54 @@ env.close()
 {% endhighlight %}
 The frame collection will be a list of 101 *rgb arrays* (1 after the initial reset and 100 steps).
 
-If you don't want rendering, you can just ignore the `render_mode` attribute; if you need to render just some frames, and the environment allows it, you can use the special mode `single_rgb_array`. In this case, the method `render` will return a single frame, as before.
+If you don't want rendering, you can just ignore the `render_mode` attribute.
 
 
 ## How to update your environment?
 
 Updating your environment to this new API is super easy. \\
-You just need to follow these 5 steps: 
+You just need to follow these 3 steps: 
 
-**1. Rename your current render function as *_render_frame* (for example)**
+**1. Add render_mode argument to init**:
 ```diff
-- def render(mode: str = "human")
-+ def _render_frame(mode: str = "human")
-```
-
-**2. Add render_mode in init and use the Renderer utility class**:
-```diff
-+ from gym.utils.renderer import Renderer
-...
 
 - def __init__(self, ...)
 + def __init__(self, render_mode: Optional[str] = None, ...)
     ...
 +   self.render_mode = render_mode
-+   self._renderer = Renderer(self.render_mode, self._render_frame)
 ```
 
-We assume that every environment can not render; thus, you don't need to add *None* to `self.metadata["render_modes"]`. Remember to specify the attribute `render_mode` for your environment. The renderer will collect a frame at each step using the function we passed, thus:
+We assume that every environment can not render; thus, you don't need to add *None* to `self.metadata["render_modes"]`. Remember to specify the attribute `render_mode` for your environment. Then:
+
+**2. Remove mode argument to render function and change all occurrences**
+```diff
+- def render(self, mode="human"):
++ def render(self):
++   mode = self.render_mode
+
+```
+
+For human mode, we want rendering to be automatic, thus:
 
 **3. Update the step and reset methods**
 ```diff
 def step(self, action):
     ...
-+   self._renderer.render_step()
++   if self.render_mode == "human":
++       self.render()
 
 ...
 
 def reset(self, ...):
     ...
-+   self._renderer.reset()
-+   self._renderer.render_step()
++   if self.render_mode == "human":
++       self.render()
 ```
 
-
-**4. Write the actual render function**
-```diff
-+ def render(self):
-+   return self._renderer.get_renders()
-```
-
-If you want to maintain backward compatibility, you will probably need to write something like this:
-```diff
-+ def render(self, mode: str = "human"):
-+   if self.render_mode is not None:
-+      return self._renderer.get_renders()
-+   else:
-+      return self._render_frame(mode)
-```
-In this case, remember to remove the *mode* argument along with the release of Gym 1.0, since it will be removed.
-At this point, your environment is supporting the new render API. However, your environment is only supporting collections of frames, thus it is not handy for rendering just part of episodes. You should
-
-**5. Support single-frame rendering**
-
-Most of the time, it just means to add *single_rgb_array* to your `render_modes`:
-
-```diff
-- metadata = {"render_modes": ["human", "rgb_array"], ...}
-+ metadata = {"render_modes": ["human", "rgb_array", "single_rgb_array"], ...}
-```
-
-and update your `_render_frame` function to behave equally for *rgb_array* and *single_rgb_array*.
-For example, replace if statements in this way:
-```diff
-- if mode == "rgb_array":
-+ if mode in {"rgb_array", "single_rgb_array"}:
-```
-
-If you have non-standard rendering modes, you can customize the Renderer class; visit the [documentation](https://github.com/openai/gym/blob/master/gym/utils/renderer.py) for more information.
-
-For more a complicated environment, the process can be different; if you need any help **feel free to contact me.** 
+At this point, your environment is supporting the new render API. 
+Your environment will automatically support also collection of frames because this is handled by [RenderCollection](https://github.com/openai/gym/blob/master/gym/wrappers/render_collection.py) wrapper.
+If you want a custom code for handling frame collection modes, you just need to add the new mode to `env.metadata['render_modes']`, and  the environment will not be wrapped by `RenderCollection`.
 
 ## Why this API?
 
-As you may noticed, this API gives more freedom for the rendering behavior of the environment. On the other side, it forbids the change of the render mode on-the-fly, but let the environment knows the render mode at initialization. This is important for some environment, since they need different initialization process for different mode, thus overcomplicated code to adhere to the old API. Moreover, some environments don't naturally render at each step (or they have multiple frames if they aren't static) but easily generate the rendering at the end of the episode. Finally, old API didn't allow to extract a smooth video when using *frame skipping*.
+As you may noticed, this API forbids the change of the render mode on-the-fly, but let the environment knows the render mode at initialization. This is important for some environment, since they need different initialization process for different mode, thus overcomplicated code to adhere to the old API. Moreover, some environments don't naturally render at each step (or they have multiple frames if they aren't static) but easily generate the rendering at the end of the episode. Finally, old API didn't allow to extract a smooth video when using *frame skipping*.
