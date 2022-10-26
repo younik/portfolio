@@ -1,0 +1,259 @@
+<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom" xml:lang="en"><generator uri="https://jekyllrb.com/" version="4.3.1">Jekyll</generator><link href="https://younis.dev/feed.xml" rel="self" type="application/atom+xml"/><link href="https://younis.dev/" rel="alternate" type="text/html" hreflang="en"/><updated>2022-10-26T20:50:48+00:00</updated><id>https://younis.dev/feed.xml</id><title type="html">blank</title><subtitle>A simple, whitespace theme for academics. Based on [*folio](https://github.com/bogoli/-folio) design. </subtitle><entry><title type="html">CUDA Basics</title><link href="https://younis.dev/blog/cuda-basics/" rel="alternate" type="text/html" title="CUDA Basics"/><published>2022-08-09T21:40:16+00:00</published><updated>2022-08-09T21:40:16+00:00</updated><id>https://younis.dev/blog/cuda-basics</id><content type="html" xml:base="https://younis.dev/blog/cuda-basics/"><![CDATA[<p>Recently, during my internship at EPFL, I worked on a CUDA kernel for matrix orthogonalization using QR decomposition. I was new to CUDA programming. Thus, I decided to write these quick notes for my future self to help refresh fundamental concepts.</p> <p>If you need to use your CUDA code with PyTorch, follow <a href="https://pytorch.org/tutorials/advanced/cpp_extension.html#writing-a-mixed-c-cuda-extension">this guide</a> after reading this.</p> <h2 id="how-cuda-code-is-executed">How CUDA code is executed</h2> <p>The GPU can easily run multiple threads in parallel. Each thread needs to execute the same instruction. Thus, each thread reads the same intruction from a CUDA function (called kernel) and executes it. <br/> What is the purpose of executing the same instruction multiple times in parallel? Well, the low-level instruction is the same, but each thread has some special registers with different values. With this difference as the starting point, each thread can read different pieces of memory, has different local results, etc.</p> <p>We will see an example soon, but first, let me define some important concepts:</p> <ul> <li><strong>block</strong>: a group of threads. When we launch a CUDA kernel, we specify the number of blocks and how many threads each block has. Threads on the same block can communicate with a shared memory and synchronization primitives since they are executed on the same Streaming Multiprocessor (SM). A GPU has multiple SM thus, if the above features are not needed, we should consider packing the total number of threads in multiple blocks.</li> <li><strong>warp</strong>: a group of 32 threads from the same block that are executed simultaneously. Not all threads that we create are executed simultaneously since we can create more threads than GPU cores. Threads are drawn out in groups of 32 (warp) to be executed together using the same clock. Thus, to maximize occupancy, we should define a number of threads per block that is a multiple of 32 (in practice a power of two, because the number of cores is always a power of two). Threads in the same warp share registers, allowing for some <a href="https://developer.nvidia.com/blog/using-cuda-warp-level-primitives/">warp-level primitives</a>.</li> </ul> <p><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/a/af/Software-Perspective_for_thread_block.jpg/800px-Software-Perspective_for_thread_block.jpg" alt=""/></p> <p>Let’s do an easy example to show these concepts. The following kernel computes the sum of two vectors a, b, and saves the result in vector c.</p> <figure class="highlight"><pre><code class="language-cuda" data-lang="cuda"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+</pre></td><td class="code"><pre><span class="k">__global__</span> 
+<span class="kt">void</span> <span class="nf">cuda_add</span><span class="p">(</span><span class="k">const</span> <span class="kt">float</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="k">const</span> <span class="kt">float</span> <span class="o">*</span><span class="n">b</span><span class="p">,</span> <span class="kt">float</span> <span class="o">*</span><span class="n">c</span><span class="p">,</span> <span class="k">const</span> <span class="kt">int</span> <span class="n">vecSize</span><span class="p">)</span> <span class="p">{</span>
+  <span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="n">blockDim</span><span class="p">.</span><span class="n">x</span> <span class="o">*</span> <span class="n">blockIdx</span><span class="p">.</span><span class="n">x</span> <span class="o">+</span> <span class="n">threadIdx</span><span class="p">.</span><span class="n">x</span><span class="p">;</span>
+  <span class="k">if</span><span class="p">(</span><span class="n">i</span> <span class="o">&lt;</span> <span class="n">vecSize</span><span class="p">){</span>
+    <span class="n">c</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">a</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">+</span> <span class="n">b</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre></figure> <p>where <em>blockDim</em>, <em>blockIdx</em>, and <em>threadIdx</em> indicates the number of thread per block, the index of the block, and the index of the thread respectively. Those dimensions can be 3-dimensional; in this simple case, we can just work with the x-axis, with a 1-D number of blocks and threads per block. <br/> The keyword <code class="language-plaintext highlighter-rouge">__global__</code> indicates that this function is a CUDA kernel and it can be launched from the CPU. Notice that the <code class="language-plaintext highlighter-rouge">__global__</code> function must be void, thus we should work with C++ pointers for the output. This is the common scenario: the CPU allocates and copies the input into the GPU memory, launches the kernel, wait for the completion, and reads the result from the output memory. Thus, we can launch the kernel with a function similar to the following one:</p> <figure class="highlight"><pre><code class="language-c--" data-lang="c++"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+</pre></td><td class="code"><pre> <span class="kt">float</span><span class="o">*</span> <span class="nf">add</span><span class="p">(</span><span class="k">const</span> <span class="kt">float</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="k">const</span> <span class="kt">float</span> <span class="o">*</span><span class="n">b</span><span class="p">,</span> <span class="k">const</span> <span class="kt">int</span> <span class="n">vecSize</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kt">float</span> <span class="o">*</span><span class="n">d_a</span><span class="p">,</span> <span class="o">*</span><span class="n">d_b</span><span class="p">,</span> <span class="o">*</span><span class="n">d_c</span><span class="p">;</span> <span class="c1">// device (GPU) vectors</span>
+
+    <span class="kt">size_t</span> <span class="n">memSize</span> <span class="o">=</span> <span class="n">vecSize</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="kt">float</span><span class="p">);</span>
+    
+    <span class="c1">// allocate memory in GPU</span>
+    <span class="n">cudaMalloc</span><span class="p">((</span><span class="kt">void</span> <span class="o">**</span><span class="p">)</span><span class="o">&amp;</span><span class="n">d_a</span><span class="p">,</span> <span class="n">memSize</span><span class="p">);</span>
+    <span class="n">cudaMalloc</span><span class="p">((</span><span class="kt">void</span> <span class="o">**</span><span class="p">)</span><span class="o">&amp;</span><span class="n">d_b</span><span class="p">,</span> <span class="n">memSize</span><span class="p">);</span>
+    <span class="n">cudaMalloc</span><span class="p">((</span><span class="kt">void</span> <span class="o">**</span><span class="p">)</span><span class="o">&amp;</span><span class="n">d_c</span><span class="p">,</span> <span class="n">memSize</span><span class="p">);</span>
+
+    <span class="c1">// copy inputs from CPU to GPU</span>
+    <span class="n">cudaMemcpy</span><span class="p">(</span><span class="n">d_a</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">memSize</span><span class="p">,</span> <span class="n">cudaMemcpyHostToDevice</span><span class="p">);</span>
+    <span class="n">cudaMemcpy</span><span class="p">(</span><span class="n">d_b</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">memSize</span><span class="p">,</span> <span class="n">cudaMemcpyHostToDevice</span><span class="p">);</span>
+
+    <span class="c1">// launch the kernel</span>
+    <span class="kt">int</span> <span class="n">threadsPerBlock</span> <span class="o">=</span> <span class="mi">256</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">blocksPerGrid</span> <span class="o">=</span> <span class="n">ceil</span><span class="p">(</span> <span class="p">(</span><span class="kt">float</span><span class="p">)</span><span class="n">vecSize</span> <span class="o">/</span> <span class="p">(</span><span class="kt">float</span><span class="p">)</span><span class="n">threadsPerBlock</span> <span class="p">);</span> <span class="c1">// include math.h</span>
+    <span class="n">cuda_add</span><span class="o">&lt;&lt;&lt;</span><span class="n">blocksPerGrid</span><span class="p">,</span> <span class="n">threadsPerBlock</span><span class="o">&gt;&gt;&gt;</span><span class="p">(</span><span class="n">d_a</span><span class="p">,</span> <span class="n">d_b</span><span class="p">,</span> <span class="n">d_c</span><span class="p">,</span> <span class="n">vecSize</span><span class="p">);</span>
+
+    <span class="c1">// free memory</span>
+    <span class="n">cudaFree</span><span class="p">(</span><span class="n">d_a</span><span class="p">);</span>
+    <span class="n">cudaFree</span><span class="p">(</span><span class="n">d_b</span><span class="p">);</span>
+
+    <span class="c1">// allocate CPU memory for result and copy data from GPU</span>
+    <span class="kt">float</span> <span class="o">*</span><span class="n">c</span> <span class="o">=</span> <span class="p">(</span><span class="kt">float</span> <span class="o">*</span><span class="p">)</span><span class="n">malloc</span><span class="p">(</span><span class="n">memSize</span><span class="p">);</span>
+    <span class="n">cudaMemcpy</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">d_c</span><span class="p">,</span> <span class="n">memSize</span><span class="p">,</span> <span class="n">cudaMemcpyDeviceToHost</span><span class="p">);</span>
+    <span class="n">cudaFree</span><span class="p">(</span><span class="n">d_c</span><span class="p">);</span>
+
+    <span class="k">return</span> <span class="n">c</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre></figure> <p>In the above example, we launch the kernel with 256 threads per block and a number of block that depends on the <em>vecSize</em>, so we have at least one thread per element. The best number of thread per block depends on the GPU and the application: it should be tuned empirically. The maximum number in recent architecure is 1024, thus it usually suffice to try few power of two to find the best value. In this example, each element of the resulting vector <em>c</em> has a thread to compute the result. For some input dimension, it is faster to have a thread handling multiple sum with a for loop. In this case, for best performances, each warp should access to a contiguous memory in order to be able to exploit the caching mechanism; we will give an example in the later section. CUDA operations are non-blocking, but they are scheduled in a <em>stream</em>. It means that line 25 might be executed before the <code class="language-plaintext highlighter-rouge">cuda_add</code> kernel completion. The GPU executes the operation in the stream sequentially, so we are sure that <code class="language-plaintext highlighter-rouge">cudaFree</code> lines are executed only after the completion of the kernel. Instead, <code class="language-plaintext highlighter-rouge">cudaMemcpy</code> is a blocking operation (with <code class="language-plaintext highlighter-rouge">cudaMemcpyAsync</code> the non-blocking counterpart), thus the result we return will be consistent. We can schedule CUDA operations on different streams to increase parallelism when there aren’t ordering contraint. We can block the CPU, waiting for operation on the GPU using the function <code class="language-plaintext highlighter-rouge">cudaDeviceSynchronize</code> or <code class="language-plaintext highlighter-rouge">cudaStreamSynchronize</code>.</p> <h2 id="reduction-pattern">Reduction pattern</h2> <p>We showed a simple pattern, where every element of the resulting vector can be computed independently from the others. Another common pattern is <em>reduction</em>, when partial results should be combined. The simplest example is the dot product, where the kernel should sum the product of elements. Writing an efficient kernel for reduction is not trivial (as starting point, you can have a look at <a href="https://developer.download.nvidia.com/assets/cuda/files/reduction.pdf">these slides</a>), but fortunately, we can rely on libraries such as <em><a href="https://docs.nvidia.com/cuda/cublas/index.html">cuBLAS</a></em> or <em><a href="https://nvlabs.github.io/cub/">CUB</a></em>. The first one contains high performant kernel for common linear algebra operations. For example, to compute the dot product, we can write something similar to this:</p> <figure class="highlight"><pre><code class="language-c--" data-lang="c++"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+</pre></td><td class="code"><pre><span class="cp">#include</span> <span class="cpf">&lt;cublas_v2.h&gt;</span><span class="cp">
+</span>
+<span class="kt">int</span> <span class="nf">main</span><span class="p">(){</span>
+    <span class="c1">// create the cuBLAS library context</span>
+    <span class="n">cublasHandle_t</span> <span class="n">h</span><span class="p">;</span>
+    <span class="n">cublasCreate</span><span class="p">(</span><span class="o">&amp;</span><span class="n">h</span><span class="p">);</span>
+
+    <span class="p">...</span> <span class="c1">// do something, create the cuda vectors d_a, d_b</span>
+
+    <span class="kt">float</span> <span class="n">result</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="n">cublasDdot</span><span class="p">(</span><span class="n">h</span><span class="p">,</span> <span class="n">vecSize</span><span class="p">,</span> <span class="n">d_a</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">d_b</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">result</span><span class="p">);</span>
+
+    <span class="p">...</span> <span class="c1">// do soething else, use the result stored in the CPU variable result</span>
+
+    <span class="c1">// destroy cuBLAS context</span>
+    <span class="n">cublasDestroy</span><span class="p">(</span><span class="n">h</span><span class="p">);</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre></figure> <p>If you want to write a custom kernel that includes reductions along with other operations, you can rely on the CUB library, which contains useful block-wide and warp-wide primitive functions. It means, that instead of calling the function from the CPU, we can call it inside a kernel, where every thread calls it. For example, we can write a dot function:</p> <figure class="highlight"><pre><code class="language-c--" data-lang="c++"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+</pre></td><td class="code"><pre><span class="cp">#include</span> <span class="cpf">&lt;cub/cub.cuh&gt;</span><span class="cp">
+</span>
+<span class="n">__global__</span> 
+<span class="kt">float</span> <span class="nf">dot</span><span class="p">(</span><span class="kt">float</span> <span class="o">*</span><span class="n">a</span><span class="p">,</span> <span class="kt">float</span> <span class="o">*</span><span class="n">b</span><span class="p">,</span> <span class="kt">int</span> <span class="n">vecSize</span><span class="p">){</span>
+    <span class="kt">int</span> <span class="n">tx</span> <span class="o">=</span> <span class="n">threadIdx</span><span class="p">.</span><span class="n">x</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">unroll</span> <span class="o">=</span> <span class="n">ceil</span><span class="p">(</span> <span class="p">(</span><span class="kt">float</span><span class="p">)</span><span class="n">vecSize</span> <span class="o">/</span> <span class="p">(</span><span class="kt">float</span><span class="p">)</span><span class="n">blockDim</span><span class="p">.</span><span class="n">x</span> <span class="p">);</span>
+    <span class="kt">int</span> <span class="n">idx</span> <span class="o">=</span> <span class="p">(</span><span class="n">tx</span> <span class="o">&amp;</span> <span class="o">-</span><span class="mi">32u</span><span class="p">)</span> <span class="o">*</span> <span class="n">unroll</span> <span class="o">+</span> <span class="p">(</span><span class="n">tx</span> <span class="o">&amp;</span> <span class="mi">31</span><span class="p">);</span>
+
+    <span class="kt">float</span> <span class="n">localProd</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">unroll</span><span class="p">;</span> <span class="o">++</span><span class="n">i</span><span class="p">){</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">idx</span> <span class="o">&lt;</span> <span class="n">length</span><span class="p">){</span>
+          <span class="n">localProd</span> <span class="o">+=</span> <span class="n">a</span><span class="p">[</span><span class="n">idx</span><span class="p">]</span> <span class="o">*</span> <span class="n">b</span><span class="p">[</span><span class="n">idx</span><span class="p">];</span>
+        <span class="p">}</span>
+        <span class="n">idx</span> <span class="o">+=</span> <span class="mi">32</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="kt">int</span> <span class="n">nWarp</span> <span class="o">=</span> <span class="n">ceil</span><span class="p">(</span><span class="n">blockDim</span><span class="p">.</span><span class="n">x</span> <span class="o">/</span> <span class="mf">32.0</span><span class="p">);</span>
+    <span class="n">__shared__</span> <span class="kt">float</span> <span class="n">tmp_storage</span><span class="p">[</span><span class="n">nWarp</span><span class="p">];</span>
+    <span class="kt">float</span> <span class="n">reduce</span> <span class="o">=</span> <span class="n">cub</span><span class="o">::</span><span class="n">BlockReduceSum</span><span class="p">(</span><span class="n">localProd</span><span class="p">,</span> <span class="n">tmp_storage</span><span class="p">);</span>
+
+    <span class="c1">// reduce contains the correct result only on thread 0</span>
+     <span class="n">__shared__</span> <span class="kt">float</span> <span class="n">dot</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">tx</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> 
+        <span class="n">dot</span> <span class="o">=</span> <span class="n">reduce</span><span class="p">;</span>
+    <span class="n">__syncthreads</span><span class="p">();</span>
+
+    <span class="k">return</span> <span class="n">dot</span><span class="p">;</span>
+<span class="p">}</span>
+</pre></td></tr></tbody></table></code></pre></figure> <p>Remembering that <code class="language-plaintext highlighter-rouge">&amp;</code> is the bitwise and operation, <code class="language-plaintext highlighter-rouge">tx &amp; 31</code> mask every bit except the last 5, thus it computes the modulo 32 operation of <code class="language-plaintext highlighter-rouge">tx</code>. Instead, <code class="language-plaintext highlighter-rouge">tx &amp; -32u</code> takes the other bits, thus it is the warp index multiplied by 32. With this in mind, line 7 computes the index for the current thread so warps can be unrolled on a contiguous memory, as shown in the following figure, where we have a vector of 128 elements and 64 threads, thus 2 warps and <code class="language-plaintext highlighter-rouge">unroll = 2</code>. In the first iteration of the loop in line 10, each thread of the first warp compute the <code class="language-plaintext highlighter-rouge">localProd</code> of the elements from 0 to 31. In the second iteration, they slide by 32 position and accumulate the product of elements.</p> <figure> <picture> <source media="(max-width: 480px)" srcset="/assets/img/warp-unroll-480.webp"/> <source media="(max-width: 800px)" srcset="/assets/img/warp-unroll-800.webp"/> <source media="(max-width: 1400px)" srcset="/assets/img/warp-unroll-1400.webp"/> <img class="img-fluid rounded" src="/assets/img/warp-unroll.jpg"/> </picture> </figure> <p>After the for loop, each thread has a local variable <code class="language-plaintext highlighter-rouge">localProd</code> with the sum of the product of <code class="language-plaintext highlighter-rouge">unroll</code> elements; the sum of all <code class="language-plaintext highlighter-rouge">localProd</code> will give us the <code class="language-plaintext highlighter-rouge">dot</code> product of the two input vectors. To achieve this, we can rely on the <code class="language-plaintext highlighter-rouge">BlockReduceSum</code> provided by CUB that should be called by each thread with the local value and shared memory to store partial results. The shared memory is allocated using the keyword <code class="language-plaintext highlighter-rouge">__shared__</code> and it is a memory accessible by all threads of the block. As you may have noticed, to support reduction we allocated a shared array that is long as the number of warps. Thread on the same warp can reduce their local value with faster registers (see <a href="https://on-demand.gputechconf.com/gtc/2013/presentations/S3174-Kepler-Shuffle-Tips-Tricks.pdf">these slides</a>), while different warps need to communicate through shared memory. The value returned by <code class="language-plaintext highlighter-rouge">BlockReduceSum</code> will be the correct result for thread 0 but will be a partial result for other threads. If we need the correct result in all threads, we can rely again on a shared value and let the first thread store the value there. Since different warps can be executed independently, we need to synchronize threads after the assignment; we can do it with the primitive <code class="language-plaintext highlighter-rouge">__syncthreads()</code>. In this way, every thread will wait until all the others in the same block reach this line. You may wonder how it is possible to have an <code class="language-plaintext highlighter-rouge">if</code> statement when all threads in a warp execute the same instruction simultaneously. This is handled by the compiler: other threads will execute <code class="language-plaintext highlighter-rouge">NOP</code> while thread 0 executes the branch. This is called <em>branch divergence</em> and, to improve performances, it should be avoided when possible.</p> <h2 id="useful-resources">Useful resources</h2> <p>There is much more to say about CUDA. A complete starting point is the <a href="https://docs.nvidia.com/cuda/pdf/CUDA_C_Programming_Guide.pdf">CUDA programming guide</a>. Other specific topics can be found on the <a href="https://docs.nvidia.com/cuda/index.html">documentation page</a>. University courses exist and provide material for a softer starting point, for example, the slides from <a href="https://people.maths.ox.ac.uk/gilesm/cuda/">this Oxford course</a>, that I report here for convenience:</p> <ul> <li><a href="https://people.maths.ox.ac.uk/gilesm/cuda/2019/lecture_01.pdf">An introduction to CUDA</a></li> <li><a href="https://people.maths.ox.ac.uk/gilesm/cuda/2019/lecture_02.pdf">Different memory and variable types</a></li> <li><a href="https://people.maths.ox.ac.uk/gilesm/cuda/2019/lecture_03.pdf">Control flow and synchronisation</a></li> <li><a href="https://people.maths.ox.ac.uk/gilesm/cuda/2019/lecture_04.pdf">Warp shuffles, and reduction / scan operations</a></li> <li><a href="https://people.maths.ox.ac.uk/gilesm/cuda/2019/lecture_05.pdf">Libraries and tools</a></li> <li><a href="https://people.maths.ox.ac.uk/gilesm/cuda/2019/lecture_06.pdf">Multiple GPUs, and odds and ends</a></li> <li><a href="https://people.maths.ox.ac.uk/gilesm/cuda/2019/lec7.pdf">Tackling a new CUDA application</a></li> <li><a href="https://people.maths.ox.ac.uk/gilesm/cuda/2019/CUDA_Course_profiling2.pdf">Profiling and tuning applications</a></li> </ul>]]></content><author><name></name></author><category term="programming"/><category term="CUDA"/><summary type="html"><![CDATA[Notes on CUDA]]></summary></entry><entry><title type="html">New render API for gym library</title><link href="https://younis.dev/blog/render-api/" rel="alternate" type="text/html" title="New render API for gym library"/><published>2022-06-09T21:40:16+00:00</published><updated>2022-06-09T21:40:16+00:00</updated><id>https://younis.dev/blog/render-api</id><content type="html" xml:base="https://younis.dev/blog/render-api/"><![CDATA[<p>I am writing this blog post to explain what has changed, the reasons behind this and how to adapt your current environment to the new API.</p> <h2 id="what-is-new">What is new?</h2> <p>If you have ever used Gym, you are probably familiar with this code:</p> <figure class="highlight"><pre><code class="language-python" data-lang="python"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+</pre></td><td class="code"><pre><span class="kn">import</span> <span class="nn">gym</span>
+
+<span class="n">env</span> <span class="o">=</span> <span class="n">gym</span><span class="p">.</span><span class="n">make</span><span class="p">(</span><span class="s">"FrozenLake-v1"</span><span class="p">)</span>
+<span class="n">env</span><span class="p">.</span><span class="n">reset</span><span class="p">()</span>
+
+<span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
+    <span class="n">env</span><span class="p">.</span><span class="n">step</span><span class="p">(</span><span class="n">env</span><span class="p">.</span><span class="n">action_space</span><span class="p">.</span><span class="n">sample</span><span class="p">())</span>
+    <span class="n">env</span><span class="p">.</span><span class="n">render</span><span class="p">()</span>
+
+<span class="n">env</span><span class="p">.</span><span class="n">close</span><span class="p">()</span>
+</pre></td></tr></tbody></table></code></pre></figure> <p>where we just create an instance of the <em>FrozenLake</em> environment and we act randomly for 100 steps. In line 8, we render a single frame representing the current state of the environment. The method <code class="language-plaintext highlighter-rouge">render</code> accepts a keyword argument <em>mode</em>; in the above case, we use the default value, i.e. <em>human</em>.</p> <p>With the new API, you need to specify the render mode at initialization, and the environment will take care to render each frame. Thus, in the case of <em>human</em> rendering, you don’t need to call the <code class="language-plaintext highlighter-rouge">render</code> at all!</p> <figure class="highlight"><pre><code class="language-python" data-lang="python"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+</pre></td><td class="code"><pre><span class="n">env</span> <span class="o">=</span> <span class="n">gym</span><span class="p">.</span><span class="n">make</span><span class="p">(</span><span class="s">"FrozenLake-v1"</span><span class="p">,</span> <span class="n">render_mode</span><span class="o">=</span><span class="s">"human"</span><span class="p">)</span>
+
+<span class="n">env</span><span class="p">.</span><span class="n">reset</span><span class="p">()</span>
+
+<span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
+    <span class="n">env</span><span class="p">.</span><span class="n">step</span><span class="p">(</span><span class="n">env</span><span class="p">.</span><span class="n">action_space</span><span class="p">.</span><span class="n">sample</span><span class="p">())</span>
+
+<span class="n">env</span><span class="p">.</span><span class="n">close</span><span class="p">()</span>
+</pre></td></tr></tbody></table></code></pre></figure> <p>For render modes that are expected to return something, you can still get the result with <code class="language-plaintext highlighter-rouge">.render()</code>:</p> <figure class="highlight"><pre><code class="language-python" data-lang="python"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+</pre></td><td class="code"><pre><span class="n">env</span> <span class="o">=</span> <span class="n">gym</span><span class="p">.</span><span class="n">make</span><span class="p">(</span><span class="s">"FrozenLake-v1"</span><span class="p">,</span> <span class="n">render_mode</span><span class="o">=</span><span class="s">"rgb_array"</span><span class="p">)</span>
+
+<span class="n">env</span><span class="p">.</span><span class="n">reset</span><span class="p">()</span>
+
+<span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
+    <span class="n">env</span><span class="p">.</span><span class="n">step</span><span class="p">(</span><span class="n">env</span><span class="p">.</span><span class="n">action_space</span><span class="p">.</span><span class="n">sample</span><span class="p">())</span>
+    <span class="n">env</span><span class="p">.</span><span class="n">render</span><span class="p">()</span>  <span class="c1"># return a ndarray frame
+</span>
+<span class="n">env</span><span class="p">.</span><span class="n">close</span><span class="p">()</span>
+</pre></td></tr></tbody></table></code></pre></figure> <p>With this new API, we also introduce <code class="language-plaintext highlighter-rouge">_list</code> modes. In this case, the environment will save all the frames internally, and you can retrieve all of them at once calling <code class="language-plaintext highlighter-rouge">render</code>:</p> <figure class="highlight"><pre><code class="language-python" data-lang="python"><table class="rouge-table"><tbody><tr><td class="gutter gl"><pre class="lineno">1
+2
+3
+4
+5
+6
+7
+8
+9
+</pre></td><td class="code"><pre><span class="n">env</span> <span class="o">=</span> <span class="n">gym</span><span class="p">.</span><span class="n">make</span><span class="p">(</span><span class="s">"FrozenLake-v1"</span><span class="p">,</span> <span class="n">render_mode</span><span class="o">=</span><span class="s">"rgb_array_list"</span><span class="p">)</span>
+
+<span class="n">env</span><span class="p">.</span><span class="n">reset</span><span class="p">()</span>
+
+<span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
+    <span class="n">env</span><span class="p">.</span><span class="n">step</span><span class="p">(</span><span class="n">env</span><span class="p">.</span><span class="n">action_space</span><span class="p">.</span><span class="n">sample</span><span class="p">())</span>
+
+<span class="n">frame_collection</span> <span class="o">=</span> <span class="n">env</span><span class="p">.</span><span class="n">render</span><span class="p">()</span>
+<span class="n">env</span><span class="p">.</span><span class="n">close</span><span class="p">()</span>
+</pre></td></tr></tbody></table></code></pre></figure> <p>The frame collection will be a list of 101 <em>rgb arrays</em> (1 after the initial reset and 100 steps).</p> <p>If you don’t want rendering, you can just ignore the <code class="language-plaintext highlighter-rouge">render_mode</code> attribute.</p> <h2 id="how-to-update-your-environment">How to update your environment?</h2> <p>Updating your environment to this new API is super easy. <br/> You just need to follow these 3 steps:</p> <p><strong>1. Add render_mode argument to init</strong>:</p> <div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="err">
+</span><span class="gd">- def __init__(self, ...)
+</span><span class="gi">+ def __init__(self, render_mode: Optional[str] = None, ...)
+</span>    ...
+<span class="gi">+   self.render_mode = render_mode
+</span></code></pre></div></div> <p>We assume that every environment can not render; thus, you don’t need to add <em>None</em> to <code class="language-plaintext highlighter-rouge">self.metadata["render_modes"]</code>. Remember to specify the attribute <code class="language-plaintext highlighter-rouge">render_mode</code> for your environment. Then:</p> <p><strong>2. Remove mode argument to render function and change all occurrences</strong></p> <div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="gd">- def render(self, mode="human"):
+</span><span class="gi">+ def render(self):
++   mode = self.render_mode
+</span><span class="err">
+</span></code></pre></div></div> <p>For human mode, we want rendering to be automatic, thus:</p> <p><strong>3. Update the step and reset methods</strong></p> <div class="language-diff highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="p">def step(self, action):
+</span>    ...
+<span class="gi">+   if self.render_mode == "human":
++       self.render()
+</span><span class="err">
+</span>...
+<span class="err">
+</span><span class="p">def reset(self, ...):
+</span>    ...
+<span class="gi">+   if self.render_mode == "human":
++       self.render()
+</span></code></pre></div></div> <p>At this point, your environment is supporting the new render API. Your environment will automatically support also collection of frames because this is handled by <a href="https://github.com/openai/gym/blob/master/gym/wrappers/render_collection.py">RenderCollection</a> wrapper. If you want a custom code for handling frame collection modes, you just need to add the new mode to <code class="language-plaintext highlighter-rouge">env.metadata['render_modes']</code>, and the environment will not be wrapped by <code class="language-plaintext highlighter-rouge">RenderCollection</code>.</p> <h2 id="why-this-api">Why this API?</h2> <p>As you may noticed, this API forbids the change of the render mode on-the-fly, but let the environment knows the render mode at initialization. This is important for some environment, since they need different initialization process for different mode, thus overcomplicated code to adhere to the old API. Moreover, some environments don’t naturally render at each step (or they have multiple frames if they aren’t static) but easily generate the rendering at the end of the episode. Finally, old API didn’t allow to extract a smooth video when using <em>frame skipping</em>.</p>]]></content><author><name></name></author><category term="programming"/><category term="AI"/><category term="gym"/><summary type="html"><![CDATA[The new Render API for gym is out!]]></summary></entry></feed>
